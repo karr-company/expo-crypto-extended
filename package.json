@@ -1,6 +1,6 @@
 {
   "name": "@karr-company/expo-crypto-extended",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Provides a unified interface for X25519 ECDH and HKDF-SHA256",
   "main": "build/index.js",
   "types": "build/index.d.ts",
