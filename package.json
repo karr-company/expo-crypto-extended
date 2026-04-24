@@ -33,7 +33,7 @@
     "expo-crypto": "^55.0.14"
   },
   "devDependencies": {
-    "@types/react": "~19.1.1",
+    "@types/react": "~19.2.14",
     "expo": "^55.0.16",
     "expo-module-scripts": "^55.0.2",
     "react-native": "0.82.1"
