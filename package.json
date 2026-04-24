@@ -18,8 +18,9 @@
   "keywords": [
     "react-native",
     "expo",
-    "@karr-company/expo-crypto-extended",
-    "ExpoCryptoExtended"
+    "crypto",
+    "android",
+    "ios"
   ],
   "repository": "https://github.com/karr-company/expo-crypto-extended",
   "bugs": {
@@ -28,11 +29,13 @@
   "author": "Karr Company <info@karrcompany.co.uk> (https://github.com/karr-company)",
   "license": "MIT",
   "homepage": "https://github.com/karr-company/expo-crypto-extended#readme",
-  "dependencies": {},
+  "dependencies": {
+    "expo-crypto": "^55.0.14"
+  },
   "devDependencies": {
     "@types/react": "~19.1.1",
-    "expo-module-scripts": "^55.0.2",
     "expo": "^55.0.16",
+    "expo-module-scripts": "^55.0.2",
     "react-native": "0.82.1"
   },
   "peerDependencies": {
