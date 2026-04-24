@@ -22,9 +22,8 @@ jobs:
         uses: googleapis/release-please-action@v4
         with:
           release-type: node
-          package-name: '@karr-company/expo-crypto-extended'
           token: ${{ secrets.GITHUB_TOKEN }}
-
+          
   publish:
     needs: release
     if: ${{ needs.release.outputs.releases_created == 'true' && github.repository == 'karr-company/expo-crypto-extended' }}
