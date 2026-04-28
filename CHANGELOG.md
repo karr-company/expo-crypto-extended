@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/karr-company/expo-crypto-extended/compare/v1.0.0...v1.1.0) (2026-04-28)
+
+
+### Features
+
+* amend b64 and unify security provider ([56dd68d](https://github.com/karr-company/expo-crypto-extended/commit/56dd68d365e913d2fdb971a49977d13b32ddf514))
+
 ## 1.0.0 (2026-04-24)
 
 
