@@ -1,16 +1,20 @@
-export * from "./ExpoCryptoExtended.types";
 import {
   AESEncryptionKey,
   AESSealedData,
   aesDecryptAsync,
   aesEncryptAsync,
 } from "expo-crypto";
-import type { EncryptedPayload, EncryptedPayloadWithNonce } from "./ExpoCryptoExtended.types";
+
+import type {
+  EncryptedPayload,
+  EncryptedPayloadWithNonce,
+} from "./ExpoCryptoExtended.types";
 import {
   computeSharedSecret,
   generateKeyPair,
   hkdfSha256,
 } from "./ExpoCryptoExtendedModule";
+export * from "./ExpoCryptoExtended.types";
 
 export {
   aesGcmDecrypt,
@@ -22,7 +26,10 @@ export {
 // Type assertion for expo-crypto static methods not exposed in TypeScript declarations.
 type AESKeyConstructor = {
   import(bytes: Uint8Array): Promise<AESEncryptionKey>;
-  import(hexString: string, encoding: "hex" | "base64"): Promise<AESEncryptionKey>;
+  import(
+    hexString: string,
+    encoding: "hex" | "base64",
+  ): Promise<AESEncryptionKey>;
 };
 
 const AESKey = AESEncryptionKey as unknown as AESKeyConstructor;
@@ -146,5 +153,9 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 function decodeBase64(base64: string): Uint8Array {
-  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const normalized =
+    base64.trim().replace(/-/g, "+").replace(/_/g, "/") +
+    "=".repeat((4 - (base64.trim().length % 4)) % 4);
+
+  return Uint8Array.from(atob(normalized), (c) => c.charCodeAt(0));
 }
