@@ -22,7 +22,10 @@
     "android",
     "ios"
   ],
-  "repository": "https://github.com/karr-company/expo-crypto-extended",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/karr-company/expo-crypto-extended.git"
+  },
   "bugs": {
     "url": "https://github.com/karr-company/expo-crypto-extended/issues"
   },
