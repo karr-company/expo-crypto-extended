@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/karr-company/expo-crypto-extended/compare/v1.1.0...v1.1.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* amend ios b64 encoding ([637eada](https://github.com/karr-company/expo-crypto-extended/commit/637eadaf444908ccb07797f64b2c3d25c1fc64e8))
+
 ## [1.1.0](https://github.com/karr-company/expo-crypto-extended/compare/v1.0.0...v1.1.0) (2026-04-28)
 
 
