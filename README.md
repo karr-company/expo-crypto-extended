@@ -204,6 +204,7 @@ Treat decryption failures as security-sensitive and fail closed.
 
 - This module currently exposes AES-GCM decryption only (no encryption helper API).
 - Web behavior depends on browser Web Crypto support and secure-context restrictions.
+- Each utility expects [URL-safe base64 encoding without padding](https://base64.guru/standards/base64url). 
 
 ## Development
 

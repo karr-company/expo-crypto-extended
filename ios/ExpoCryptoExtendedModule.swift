@@ -15,8 +15,8 @@ public class ExpoCryptoExtendedModule: Module {
       let privateKey = Curve25519.KeyAgreement.PrivateKey()
       let publicKey = privateKey.publicKey
       let keyPair = X25519KeyPair(
-        publicKey: publicKey.rawRepresentation.base64EncodedString(),
-        privateKey: privateKey.rawRepresentation.base64EncodedString()
+        publicKey: encodeBase64url(publicKey.rawRepresentation),
+        privateKey: encodeBase64url(privateKey.rawRepresentation)
       )
       promise.resolve(keyPair)
       return
@@ -25,8 +25,8 @@ public class ExpoCryptoExtendedModule: Module {
     AsyncFunction("computeSharedSecret") { (privateKeyB64: String,
                                             endPublicKeyB64: String,
                                             promise: Promise) in
-      guard let privateKeyData = Data(base64Encoded: privateKeyB64),
-            let endPublicKeyData = Data(base64Encoded: endPublicKeyB64) else {
+      guard let privateKeyData = decodeBase64url(privateKeyB64),
+            let endPublicKeyData = decodeBase64url(endPublicKeyB64) else {
         promise.reject(Exception(name: "InvalidKey", description: "Invalid base64 key"))
         return
       }
@@ -37,7 +37,7 @@ public class ExpoCryptoExtendedModule: Module {
       let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: endPublicKey)
       
       // Return raw bytes as base64
-      let s = sharedSecret.withUnsafeBytes { Data($0).base64EncodedString() }
+      let s = sharedSecret.withUnsafeBytes { encodeBase64url(Data($0)) }
       promise.resolve(s)
       return
     }
@@ -47,7 +47,7 @@ public class ExpoCryptoExtendedModule: Module {
                                    info: String,
                                    keyLength: Int,
                                    promise: Promise) in
-      guard let ikmData = Data(base64Encoded: ikmB64) else {
+      guard let ikmData = decodeBase64url(ikmB64) else {
         promise.reject(Exception(name: "InvalidKey", description: "Invalid base64 IKM"))
         return
       }
@@ -72,7 +72,7 @@ public class ExpoCryptoExtendedModule: Module {
                                       nonceB64url: String,
                                       ciphertextB64url: String,
                                       promise: Promise) in
-      guard let keyData = Data(base64Encoded: keyB64) else {
+      guard let keyData = decodeBase64url(keyB64) else {
         promise.reject(Exception(name: "InvalidKey", description: "Invalid base64 AES key"))
         return
       }
@@ -120,4 +120,12 @@ private func decodeBase64url(_ base64url: String) -> Data? {
     base64 += String(repeating: "=", count: 4 - remainder)
   }
   return Data(base64Encoded: base64)
+}
+
+private func encodeBase64url(_ data: Data) -> String {
+  return data
+    .base64EncodedString()
+    .replacingOccurrences(of: "+", with: "-")
+    .replacingOccurrences(of: "/", with: "_")
+    .replacingOccurrences(of: "=", with: "")
 }
