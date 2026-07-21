@@ -4,6 +4,7 @@ import {
   aesDecryptAsync,
   aesEncryptAsync,
 } from "expo-crypto";
+import * as SecureStore from "expo-secure-store";
 
 import type {
   EncryptedPayload,
@@ -158,4 +159,29 @@ function decodeBase64(base64: string): Uint8Array {
     "=".repeat((4 - (base64.trim().length % 4)) % 4);
 
   return Uint8Array.from(atob(normalized), (c) => c.charCodeAt(0));
+}
+
+const INSTANCE_KEY_PAIR_STORAGE_KEY = "device_instance_keypair";
+
+/**
+ * Retrieves the persistent X25519 key pair for this app instance,
+ * or generates and securely stores a new one if it doesn't exist.
+ */
+export async function getOrCreateInstanceKeyPair() {
+  const existingKeys = await SecureStore.getItemAsync(
+    INSTANCE_KEY_PAIR_STORAGE_KEY,
+  );
+
+  if (existingKeys) {
+    return JSON.parse(existingKeys);
+  }
+
+  const newKeyPair = await generateKeyPair();
+
+  await SecureStore.setItemAsync(
+    INSTANCE_KEY_PAIR_STORAGE_KEY,
+    JSON.stringify(newKeyPair),
+  );
+
+  return newKeyPair;
 }
