@@ -1,8 +1,5 @@
 package expo.modules.cryptoextended
 
-import android.content.Context
-import android.content.pm.PackageManager
-import android.util.Base64
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import javax.crypto.Mac
@@ -13,58 +10,47 @@ class ExpoCryptoExtendedModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("ExpoCryptoExtended")
 
-    // 1. Read custom HKDF fallback metadata injected into the AndroidManifest by your config plugin
-    val context = appContext.reactContext
-    val ai = context?.packageManager?.getApplicationInfo(context.packageName, PackageManager.GET_META_DATA)
-    val bundle = ai?.metaData
+    // Retain native HKDF execution, accepting dynamic salt and info passed from JS
+    AsyncFunction("deriveKey") { ikmHex: String, saltHex: String, infoHex: String ->
+      val ikm = ikmHex.decodeHex()
+      val salt = if (saltHex.isNotEmpty()) saltHex.decodeHex() else ByteArray(32)
+      val info = infoHex.decodeHex()
 
-    val manifestSalt = bundle?.getString("EXPO_CRYPTO_EXTENDED_SALT") ?: "karr-e2e-v1-salt"
-    val manifestInfo = bundle?.getString("EXPO_CRYPTO_EXTENDED_INFO") ?: "karr-e2e-v1-aes-gcm-key"
+      val derivedKeyBytes = hkdfSha256(ikm, salt, info, 32)
+      return@AsyncFunction derivedKeyBytes.toHex()
+    }
+  }
 
-    // 2. Expose these fallback configurations to the TypeScript bridge
-    Constants(
-      "FALLBACK_SALT" to manifestSalt,
-      "FALLBACK_INFO" to manifestInfo
-    )
+  // Native HKDF-SHA256 Implementation in Kotlin
+  private fun hkdfSha256(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
+    val mac = Mac.getInstance("HmacSHA256")
+    val saltKey = SecretKeySpec(if (salt.isEmpty()) ByteArray(32) else salt, "HmacSHA256")
+    mac.init(saltKey)
+    val prk = mac.doFinal(ikm)
 
-    // 3. Real HKDF-SHA256 Implementation
-    Function("hkdfSha256") { ikmBase64: String, salt: String, info: String, keyLength: Int ->
-      val ikm = Base64.decode(ikmBase64, Base64.DEFAULT)
-      val saltBytes = salt.toByteArray(Charsets.UTF_8)
-      val infoBytes = info.toByteArray(Charsets.UTF_8)
+    val prkKey = SecretKeySpec(prk, "HmacSHA256")
+    val hashLen = 32
+    val n = ceil(length.toDouble() / hashLen).toInt()
+    var okm = ByteArray(0)
+    var previousT = ByteArray(0)
 
-      // Step 3a: HKDF-Extract
-      val macExtract = Mac.getInstance("HmacSHA256")
-      val prkSpec = SecretKeySpec(if (saltBytes.isEmpty()) ByteArray(32) else saltBytes, "HmacSHA256")
-      macExtract.init(prkSpec)
-      val prk = macExtract.doFinal(ikm)
-
-      // Step 3b: HKDF-Expand
-      val macExpand = Mac.getInstance("HmacSHA256")
-      macExpand.init(SecretKeySpec(prk, "HmacSHA256"))
-
-      val hashLen = 32
-      val iterations = ceil(keyLength.toDouble() / hashLen).toInt()
-      val okm = ByteArray(iterations * hashLen)
-      var t = ByteArray(0)
-
-      for (i in 1..iterations) {
-        macExpand.reset()
-        macExpand.update(t)
-        macExpand.update(infoBytes)
-        macExpand.update(i.toByte())
-        t = macExpand.doFinal()
-        System.arraycopy(t, 0, okm, (i - 1) * hashLen, t.size)
-      }
-
-      // Slice to required output key length and return as Base64
-      val resultBytes = okm.copyOfRange(0, keyLength)
-      Base64.encodeToString(resultBytes, Base64.NO_WRAP)
+    for (i in 1..n) {
+      mac.init(prkKey)
+      mac.update(previousT)
+      mac.update(info)
+      mac.update(i.toByte())
+      previousT = mac.doFinal()
+      okm += previousT
     }
 
-    // Placeholders for remaining crypto systems if implemented via JSI or alternative files
-    Function("generateKeyPair") { "" }
-    Function("computeSharedSecret") { _: String, _: String -> "" }
-    Function("aesGcmDecrypt") { _: String, _: String, _: String -> "" }
+    return okm.copyOf(length)
   }
+
+  // Extension helpers for Hex string conversions
+  private fun String.decodeHex(): ByteArray {
+    check(length % 2 == 0) { "Must have an even length" }
+    return chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+  }
+
+  private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }
