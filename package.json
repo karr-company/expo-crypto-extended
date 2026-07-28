@@ -33,13 +33,14 @@
   "license": "MIT",
   "homepage": "https://github.com/karr-company/expo-crypto-extended#readme",
   "dependencies": {
-    "expo-crypto": "~55.0.15"
+    "expo": "^57.0.0",
+    "expo-crypto": "~55.0.17"
   },
   "devDependencies": {
     "@types/react": "~19.2.10",
-    "expo": "~55.0.25",
+    "expo": "~55.0.28",
     "expo-module-scripts": "^55.0.2",
-    "react-native": "0.83.6"
+    "react-native": "0.83.10"
   },
   "peerDependencies": {
     "expo": "*",
