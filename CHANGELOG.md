@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/karr-company/expo-crypto-extended/compare/v1.1.1...v1.2.0) (2026-07-29)
+
+
+### Features
+
+* **KLTS-166:** enable dynamic HKDF parameters from app configuration ([#31](https://github.com/karr-company/expo-crypto-extended/issues/31)) ([5c976fd](https://github.com/karr-company/expo-crypto-extended/commit/5c976fd66e0cc7ba88775cd6675b530fe876724f))
+
 ## [1.1.1](https://github.com/karr-company/expo-crypto-extended/compare/v1.1.0...v1.1.1) (2026-05-20)
 
 
