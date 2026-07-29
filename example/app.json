@@ -27,6 +27,15 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "@karr-company/expo-crypto-extended/app.plugin.js",
+        {
+          "salt": "example-app-salt",
+          "info": "example-app-info"
+        }
+      ]
+    ]
   }
 }

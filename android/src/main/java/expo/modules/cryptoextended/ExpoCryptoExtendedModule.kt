@@ -1,5 +1,6 @@
 package expo.modules.cryptoextended
 
+import android.content.pm.PackageManager
 import android.util.Base64
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
@@ -18,12 +19,25 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+class HkdfSha256Params(
+  @Field val ikmBase64: String = "",
+  @Field val keyLength: Int = 0,
+  @Field val salt: String? = null,
+  @Field val info: String? = null
+): Record
+
 class X25519KeyPair(
   @Field val publicKey: String = "",
   @Field val privateKey: String = ""
-) : Record
+): Record
 
-private const val BASE64_URL_FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+class HkdfSaltInfo(
+  @Field val salt: String = "",
+  @Field val info: String = ""
+): Record
+
+private
+const val BASE64_URL_FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
 private fun decodeBase64Compat(value: String): ByteArray {
   val trimmed = value.trim()
@@ -35,103 +49,126 @@ private fun decodeBase64Compat(value: String): ByteArray {
   }
 }
 
-class ExpoCryptoExtendedModule : Module() {
+class ExpoCryptoExtendedModule: Module() {
   override fun definition() = ModuleDefinition {
     Name("ExpoCryptoExtended")
 
-    AsyncFunction("generateKeyPair") { promise: Promise ->
-      try {
-        val gen = X25519KeyPairGenerator()
-        gen.init(X25519KeyGenerationParameters(SecureRandom()))
-        val keyPair = gen.generateKeyPair()
+    AsyncFunction("generateKeyPair") {
+      promise: Promise ->
+        try {
+          val gen = X25519KeyPairGenerator()
+          gen.init(X25519KeyGenerationParameters(SecureRandom()))
+          val keyPair = gen.generateKeyPair()
 
-        val publicKey = keyPair.public as X25519PublicKeyParameters
-        val privateKey = keyPair.private as X25519PrivateKeyParameters
+          val publicKey = keyPair.public as X25519PublicKeyParameters
+          val privateKey = keyPair.private as X25519PrivateKeyParameters
 
-        promise.resolve(
-          X25519KeyPair(
-            publicKey = Base64.encodeToString(publicKey.encoded, BASE64_URL_FLAGS),
-            privateKey = Base64.encodeToString(privateKey.encoded, BASE64_URL_FLAGS)
+          promise.resolve(
+            X25519KeyPair(
+              publicKey = Base64.encodeToString(publicKey.encoded, BASE64_URL_FLAGS),
+              privateKey = Base64.encodeToString(privateKey.encoded, BASE64_URL_FLAGS)
+            )
           )
-        )
-      } catch (e: Exception) {
-        promise.reject("ERR_KEYGEN", e.message, e)
-      }
+        } catch (e: Exception) {
+          promise.reject("ERR_KEYGEN", e.message, e)
+        }
     }
 
     AsyncFunction("computeSharedSecret") {
       privateKeyBase64: String,
       endPublicKeyBase64: String,
       promise: Promise ->
-      try {
-        val privateBytes = decodeBase64Compat(privateKeyBase64)
-        val publicBytes = decodeBase64Compat(endPublicKeyBase64)
+        try {
+          val privateBytes = decodeBase64Compat(privateKeyBase64)
+          val publicBytes = decodeBase64Compat(endPublicKeyBase64)
 
-        val privateKey = X25519PrivateKeyParameters(privateBytes, 0)
-        val publicKey = X25519PublicKeyParameters(publicBytes, 0)
+          val privateKey = X25519PrivateKeyParameters(privateBytes, 0)
+          val publicKey = X25519PublicKeyParameters(publicBytes, 0)
 
-        val agreement = X25519Agreement()
-        agreement.init(privateKey)
-        val sharedSecret = ByteArray(agreement.agreementSize)
-        agreement.calculateAgreement(publicKey, sharedSecret, 0)
+          val agreement = X25519Agreement()
+          agreement.init(privateKey)
+          val sharedSecret = ByteArray(agreement.agreementSize)
+          agreement.calculateAgreement(publicKey, sharedSecret, 0)
 
-        promise.resolve(Base64.encodeToString(sharedSecret, Base64.NO_WRAP))
-      } catch (e: Exception) {
-        promise.reject("ERR_ECDH", e.message, e)
-      }
+          promise.resolve(Base64.encodeToString(sharedSecret, Base64.NO_WRAP))
+        } catch (e: Exception) {
+          promise.reject("ERR_ECDH", e.message, e)
+        }
     }
 
-    AsyncFunction("hkdfSha256") { ikmBase64: String,
-                                   salt: String,
-                                   info: String,
-                                   keyLength: Int,
-                                   promise: Promise ->
-      try {
-        val ikmBytes = decodeBase64Compat(ikmBase64)
-        val saltBytes = salt.toByteArray(Charsets.UTF_8)
-        val infoBytes = info.toByteArray(Charsets.UTF_8)
+    AsyncFunction("hkdfSha256") {
+      params: HkdfSha256Params,
+      promise: Promise ->
+        try {
+          val applicationInfo = appContext?.reactContext?.packageManager?.getApplicationInfo(appContext?.reactContext?.packageName.toString(), PackageManager.GET_META_DATA)
 
-        val generator = HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA256Digest())
-        generator.init(HKDFParameters(ikmBytes, saltBytes, infoBytes))
+          val ikmBytes = decodeBase64Compat(params.ikmBase64)
 
-        val out = ByteArray(keyLength)
-        generator.generateBytes(out, 0, keyLength)
+          val salt = params.salt ?: applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_SALT") ?: "karr-e2e-v1-salt"
+          val info = params.info ?: applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_INFO") ?: "karr-e2e-v1-aes-gcm-key"
 
-        promise.resolve(Base64.encodeToString(out, Base64.NO_WRAP))
-        return@AsyncFunction
-      } catch (e: Exception) {
-        promise.reject("ERR_HKDF", e.message, e)
-        return@AsyncFunction
-      }
-    }
+          val saltBytes = salt.toByteArray(Charsets.UTF_8)
+          val infoBytes = info.toByteArray(Charsets.UTF_8)
+          val keyLength = params.keyLength
 
-    AsyncFunction("aesGcmDecrypt") { keyBase64: String,
-                                     nonceBase64url: String,
-                                     ciphertextBase64url: String,
-                                     promise: Promise ->
-      try {
-        val keyBytes = decodeBase64Compat(keyBase64)
-        val nonceBytes = decodeBase64Compat(nonceBase64url)
-        val combined = decodeBase64Compat(ciphertextBase64url)
+          val generator = HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA256Digest())
+          generator.init(HKDFParameters(ikmBytes, saltBytes, infoBytes))
 
-        if (combined.size <= 16) {
-          promise.reject("ERR_AES_GCM", "Ciphertext too short to contain auth tag", null)
+          val out = ByteArray(keyLength)
+          generator.generateBytes(out, 0, keyLength)
+
+          promise.resolve(Base64.encodeToString(out, Base64.NO_WRAP))
+          return@AsyncFunction
+        } catch (e: Exception) {
+          promise.reject("ERR_HKDF", e.message, e)
           return@AsyncFunction
         }
+    }
 
-        // JCA AES/GCM/NoPadding expects ciphertext with tag appended — pass combined as-is
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        val keySpec = SecretKeySpec(keyBytes, "AES")
-        val gcmSpec = GCMParameterSpec(128, nonceBytes)
-        cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+    AsyncFunction("aesGcmDecrypt") {
+      keyBase64: String,
+      nonceBase64url: String,
+      ciphertextBase64url: String,
+      promise: Promise ->
+        try {
+          val keyBytes = decodeBase64Compat(keyBase64)
+          val nonceBytes = decodeBase64Compat(nonceBase64url)
+          val combined = decodeBase64Compat(ciphertextBase64url)
 
-        val plainBytes = cipher.doFinal(combined)
-        promise.resolve(String(plainBytes, Charsets.UTF_8))
-        return@AsyncFunction
-      } catch (e: Exception) {
-        promise.reject("ERR_AES_GCM", e.message, e)
-        return@AsyncFunction
-      }
+          if (combined.size <= 16) {
+            promise.reject("ERR_AES_GCM", "Ciphertext too short to contain auth tag", null)
+            return@AsyncFunction
+          }
+
+          // JCA AES/GCM/NoPadding expects ciphertext with tag appended — pass combined as-is
+          val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+          val keySpec = SecretKeySpec(keyBytes, "AES")
+          val gcmSpec = GCMParameterSpec(128, nonceBytes)
+          cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+
+          val plainBytes = cipher.doFinal(combined)
+          promise.resolve(String(plainBytes, Charsets.UTF_8))
+          return@AsyncFunction
+        } catch (e: Exception) {
+          promise.reject("ERR_AES_GCM", e.message, e)
+          return@AsyncFunction
+        }
+    }
+
+    AsyncFunction("getHkdfInfo") {
+      promise: Promise ->
+        try {
+          val applicationInfo = appContext?.reactContext?.packageManager?.getApplicationInfo(appContext?.reactContext?.packageName.toString(), PackageManager.GET_META_DATA)
+
+          val salt = applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_SALT")
+          val info = applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_INFO")
+
+          promise.resolve(HkdfSaltInfo(salt = salt ?: "", info = info ?: ""))
+          return@AsyncFunction
+        } catch (e: Exception) {
+          promise.reject("ERR_HKDF", e.message, e)
+          return@AsyncFunction
+        }
     }
   }
 }

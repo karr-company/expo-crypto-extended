@@ -2,20 +2,29 @@ import {
   decrypt,
   encrypt,
   generateKeyPair,
+  getHkdfInfo,
   type EncryptedPayload,
   type EncryptedPayloadWithNonce,
 } from "@karr-company/expo-crypto-extended";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const SALT = "example-salt-v1";
-const INFO = "example-info-v1";
 const PLAINTEXT = "Hello world! 👋";
 
-export default function App() {
-  const [combinedPayload, setCombinedPayload] = useState<EncryptedPayload | null>(null);
-  const [noncePayload, setNoncePayload] = useState<EncryptedPayloadWithNonce | null>(null);
+function DemoWrapper({
+  title,
+  salt,
+  info,
+}: {
+  title: string;
+  salt?: string;
+  info?: string;
+}) {
+  const [combinedPayload, setCombinedPayload] =
+    useState<EncryptedPayload | null>(null);
+  const [noncePayload, setNoncePayload] =
+    useState<EncryptedPayloadWithNonce | null>(null);
   const [combinedPlaintext, setCombinedPlaintext] = useState<string>("");
   const [noncePlaintext, setNoncePlaintext] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -28,37 +37,37 @@ export default function App() {
 
       const receiver = await generateKeyPair();
 
-      const payloadCombined = await encrypt(
-        PLAINTEXT,
-        receiver.publicKey,
-        SALT,
-        INFO,
-      );
+      const payloadCombined = await encrypt({
+        plaintext: PLAINTEXT,
+        recipientPublicKey: receiver.publicKey,
+        salt,
+        info,
+      });
       setCombinedPayload(payloadCombined);
 
-      const decryptedCombined = await decrypt(
-        payloadCombined,
-        receiver.privateKey,
-        SALT,
-        INFO,
-      );
+      const decryptedCombined = await decrypt({
+        payload: payloadCombined,
+        recipientPrivateKey: receiver.privateKey,
+        salt,
+        info,
+      });
       setCombinedPlaintext(decryptedCombined);
 
-      const payloadWithNonce = await encrypt(
-        PLAINTEXT,
-        receiver.publicKey,
-        SALT,
-        INFO,
-        { withNonce: true },
-      );
+      const payloadWithNonce = await encrypt({
+        plaintext: PLAINTEXT,
+        recipientPublicKey: receiver.publicKey,
+        salt,
+        info,
+        withNonce: true,
+      });
       setNoncePayload(payloadWithNonce);
 
-      const decryptedWithNonce = await decrypt(
-        payloadWithNonce,
-        receiver.privateKey,
-        SALT,
-        INFO,
-      );
+      const decryptedWithNonce = await decrypt({
+        payload: payloadWithNonce,
+        recipientPrivateKey: receiver.privateKey,
+        salt,
+        info,
+      });
       setNoncePlaintext(decryptedWithNonce);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -67,32 +76,67 @@ export default function App() {
   };
 
   return (
+    <Group title={title}>
+      <Button title="Run Encrypt/Decrypt Demo" onPress={runDemo} />
+
+      <Group title="Combined payload (nonce embedded)">
+        <LabelValue label="ciphertext" value={combinedPayload?.ciphertext} />
+        <LabelValue
+          label="ephemeralPublicKey"
+          value={combinedPayload?.ephemeralPublicKey}
+        />
+        <LabelValue label="decrypted" value={combinedPlaintext} />
+      </Group>
+
+      <Group title="Payload with explicit nonce">
+        <LabelValue label="nonce" value={noncePayload?.nonce} />
+        <LabelValue label="ciphertext" value={noncePayload?.ciphertext} />
+        <LabelValue
+          label="ephemeralPublicKey"
+          value={noncePayload?.ephemeralPublicKey}
+        />
+        <LabelValue label="decrypted" value={noncePlaintext} />
+      </Group>
+
+      {error ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorTitle}>Error</Text>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+    </Group>
+  );
+}
+
+export default function App() {
+  const [salt, setSalt] = useState<string>("");
+  const [info, setInfo] = useState<string>("");
+
+  useEffect(() => {
+    getHkdfInfo().then((res) => {
+      setSalt(res.salt);
+      setInfo(res.info);
+    });
+  }, []);
+
+  return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.header}>expo-crypto-extended example</Text>
-        <Text style={styles.subheader}>Demonstrates both payload formats for encrypt/decrypt.</Text>
+        <Text style={styles.subheader}>
+          Demonstrates both payload formats for encrypt/decrypt.
+        </Text>
 
-        <Button title="Run Encrypt/Decrypt Demo" onPress={runDemo} />
-
-        <Group title="Combined payload (nonce embedded)">
-          <LabelValue label="ciphertext" value={combinedPayload?.ciphertext} />
-          <LabelValue label="ephemeralPublicKey" value={combinedPayload?.ephemeralPublicKey} />
-          <LabelValue label="decrypted" value={combinedPlaintext} />
+        <DemoWrapper
+          title="With explicit salt/info (overrides plugin)"
+          salt="inline-salt-v1"
+          info="inline-info-v1"
+        />
+        <DemoWrapper title="With plugin-configured salt/info (from app.json)" />
+        <Group title="HKDF info">
+          <LabelValue label="salt" value={salt} />
+          <LabelValue label="info" value={info} />
         </Group>
-
-        <Group title="Payload with explicit nonce">
-          <LabelValue label="nonce" value={noncePayload?.nonce} />
-          <LabelValue label="ciphertext" value={noncePayload?.ciphertext} />
-          <LabelValue label="ephemeralPublicKey" value={noncePayload?.ephemeralPublicKey} />
-          <LabelValue label="decrypted" value={noncePlaintext} />
-        </Group>
-
-        {error ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorTitle}>Error</Text>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

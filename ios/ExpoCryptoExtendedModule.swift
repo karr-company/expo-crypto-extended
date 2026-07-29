@@ -1,16 +1,28 @@
-import ExpoModulesCore
 import CryptoKit
+import ExpoModulesCore
 
 struct X25519KeyPair: Record {
   @Field var publicKey: String = ""
   @Field var privateKey: String = ""
 }
 
+struct HkdfSha256Params: Record {
+  @Field var ikmBase64: String = ""
+  @Field var keyLength: Int = 0
+  @Field var salt: String? = nil
+  @Field var info: String? = nil
+}
+
+struct HkdfSaltInfo: Record {
+  @Field var salt: String = ""
+  @Field var info: String = ""
+}
+
 public class ExpoCryptoExtendedModule: Module {
 
   public func definition() -> ModuleDefinition {
     Name("ExpoCryptoExtended")
-    
+
     AsyncFunction("generateKeyPair") { (promise: Promise) in
       let privateKey = Curve25519.KeyAgreement.PrivateKey()
       let publicKey = privateKey.publicKey
@@ -22,45 +34,61 @@ public class ExpoCryptoExtendedModule: Module {
       return
     }
 
-    AsyncFunction("computeSharedSecret") { (privateKeyB64: String,
-                                            endPublicKeyB64: String,
-                                            promise: Promise) in
+    AsyncFunction("computeSharedSecret") {
+      (
+        privateKeyB64: String,
+        endPublicKeyB64: String,
+        promise: Promise
+      ) in
       guard let privateKeyData = decodeBase64url(privateKeyB64),
-            let endPublicKeyData = decodeBase64url(endPublicKeyB64) else {
+        let endPublicKeyData = decodeBase64url(endPublicKeyB64)
+      else {
         promise.reject(Exception(name: "InvalidKey", description: "Invalid base64 key"))
         return
       }
-      
+
       let privateKey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: privateKeyData)
       let endPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: endPublicKeyData)
-      
+
       let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: endPublicKey)
-      
+
       // Return raw bytes as base64
       let s = sharedSecret.withUnsafeBytes { encodeBase64url(Data($0)) }
       promise.resolve(s)
       return
     }
 
-    AsyncFunction("hkdfSha256") { (ikmB64: String,
-                                   salt: String,
-                                   info: String,
-                                   keyLength: Int,
-                                   promise: Promise) in
-      guard let ikmData = decodeBase64url(ikmB64) else {
+    AsyncFunction("hkdfSha256") {
+      (
+        params: HkdfSha256Params,
+        promise: Promise
+      ) in
+      guard let ikmData = decodeBase64url(params.ikmBase64) else {
         promise.reject(Exception(name: "InvalidKey", description: "Invalid base64 IKM"))
         return
       }
 
-      let saltData = Data(salt.utf8)
-      let infoData = Data(info.utf8)
+      let salt =
+        params.salt ?? Bundle.main.object(forInfoDictionaryKey: "EXPO_CRYPTO_EXTENDED_SALT")
+        as? String
+      let info =
+        params.info ?? Bundle.main.object(forInfoDictionaryKey: "EXPO_CRYPTO_EXTENDED_INFO")
+        as? String
+
+      guard let saltData = salt.flatMap(Data.init),
+        let infoData = info.flatMap(Data.init)
+      else {
+        promise.reject(Exception(name: "InvalidConfig", description: "Missing salt or info"))
+        return
+      }
+
       let ikm = SymmetricKey(data: ikmData)
 
       let derived = HKDF<SHA256>.deriveKey(
         inputKeyMaterial: ikm,
         salt: saltData,
         info: infoData,
-        outputByteCount: keyLength
+        outputByteCount: params.keyLength
       )
 
       let derivedB64 = derived.withUnsafeBytes { Data($0).base64EncodedString() }
@@ -68,23 +96,29 @@ public class ExpoCryptoExtendedModule: Module {
       return
     }
 
-    AsyncFunction("aesGcmDecrypt") { (keyB64: String,
-                                      nonceB64url: String,
-                                      ciphertextB64url: String,
-                                      promise: Promise) in
+    AsyncFunction("aesGcmDecrypt") {
+      (
+        keyB64: String,
+        nonceB64url: String,
+        ciphertextB64url: String,
+        promise: Promise
+      ) in
       guard let keyData = decodeBase64url(keyB64) else {
         promise.reject(Exception(name: "InvalidKey", description: "Invalid base64 AES key"))
         return
       }
 
       guard let nonceData = decodeBase64url(nonceB64url),
-            let combinedData = decodeBase64url(ciphertextB64url) else {
-        promise.reject(Exception(name: "InvalidInput", description: "Invalid base64url nonce or ciphertext"))
+        let combinedData = decodeBase64url(ciphertextB64url)
+      else {
+        promise.reject(
+          Exception(name: "InvalidInput", description: "Invalid base64url nonce or ciphertext"))
         return
       }
 
       guard combinedData.count > 16 else {
-        promise.reject(Exception(name: "InvalidInput", description: "Ciphertext too short to contain auth tag"))
+        promise.reject(
+          Exception(name: "InvalidInput", description: "Ciphertext too short to contain auth tag"))
         return
       }
 
@@ -97,7 +131,8 @@ public class ExpoCryptoExtendedModule: Module {
         let plainData = try AES.GCM.open(sealedBox, using: SymmetricKey(data: keyData))
 
         guard let plaintext = String(data: plainData, encoding: .utf8) else {
-          promise.reject(Exception(name: "DecodingError", description: "Decrypted bytes are not valid UTF-8"))
+          promise.reject(
+            Exception(name: "DecodingError", description: "Decrypted bytes are not valid UTF-8"))
           return
         }
         promise.resolve(plaintext)
@@ -106,13 +141,22 @@ public class ExpoCryptoExtendedModule: Module {
       }
       return
     }
+
+    AsyncFunction("getHkdfInfo") { promise: Promise in
+      let salt = Bundle.main.object(forInfoDictionaryKey: "EXPO_CRYPTO_EXTENDED_SALT") as? String
+      let info = Bundle.main.object(forInfoDictionaryKey: "EXPO_CRYPTO_EXTENDED_INFO") as? String
+
+      promise.resolve(HkdfSaltInfo(salt: salt ?? "", info: info ?? ""))
+      return
+    }
   }
 }
 
 // Decodes a base64url string (RFC 4648 §5) into Data.
 // Converts `-` -> `+`, `_` -> `/` and adds `=` padding.
 private func decodeBase64url(_ base64url: String) -> Data? {
-  var base64 = base64url
+  var base64 =
+    base64url
     .replacingOccurrences(of: "-", with: "+")
     .replacingOccurrences(of: "_", with: "/")
   let remainder = base64.count % 4
@@ -123,7 +167,8 @@ private func decodeBase64url(_ base64url: String) -> Data? {
 }
 
 private func encodeBase64url(_ data: Data) -> String {
-  return data
+  return
+    data
     .base64EncodedString()
     .replacingOccurrences(of: "+", with: "-")
     .replacingOccurrences(of: "/", with: "_")
