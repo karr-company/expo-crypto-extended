@@ -1,4 +1,11 @@
-import { X25519KeyPair } from "./ExpoCryptoExtended.types";
+import Constants from "expo-constants";
+
+import { DEFAULT_SALT, DEFAULT_INFO } from "./ExpoCryptoExtended.constants";
+import type {
+  HkdfSaltInfo,
+  HkdfSha256Params,
+  X25519KeyPair,
+} from "./ExpoCryptoExtended.types";
 
 export function generateKeyPair(): Promise<X25519KeyPair> {
   return new Promise((resolve) => {
@@ -53,17 +60,26 @@ export function computeSharedSecret(
   });
 }
 
-export async function hkdfSha256(
-  ikmBase64: string,
-  salt: string,
-  info: string,
-  keyLength: number,
-): Promise<string> {
+export async function hkdfSha256({
+  ikmBase64,
+  salt,
+  info,
+  keyLength,
+}: HkdfSha256Params): Promise<string> {
   const subtle = crypto.subtle;
 
+  const mSalt =
+    salt ||
+    Constants.expoConfig?.extra?.ExpoCryptoExtended.salt ||
+    DEFAULT_SALT;
+  const mInfo =
+    info ||
+    Constants.expoConfig?.extra?.ExpoCryptoExtended.info ||
+    DEFAULT_INFO;
+
   const ikmBytes = base64ToBytes(ikmBase64);
-  const saltBytes = new TextEncoder().encode(salt);
-  const infoBytes = new TextEncoder().encode(info);
+  const saltBytes = new TextEncoder().encode(mSalt);
+  const infoBytes = new TextEncoder().encode(mInfo);
 
   const baseKey = await subtle.importKey("raw", ikmBytes, "HKDF", false, [
     "deriveBits",
@@ -109,6 +125,16 @@ export async function aesGcmDecrypt(
   );
 
   return new TextDecoder().decode(plainBuffer);
+}
+
+export async function getHkdfInfo(): Promise<HkdfSaltInfo> {
+  const salt = Constants.expoConfig?.extra?.ExpoCryptoExtended.salt;
+  const info = Constants.expoConfig?.extra?.ExpoCryptoExtended.info;
+
+  return {
+    salt: salt ?? DEFAULT_SALT,
+    info: info ?? DEFAULT_INFO,
+  };
 }
 
 function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {

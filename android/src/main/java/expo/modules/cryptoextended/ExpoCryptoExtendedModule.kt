@@ -1,56 +1,174 @@
 package expo.modules.cryptoextended
 
+import android.content.pm.PackageManager
+import android.util.Base64
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import javax.crypto.Mac
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
+import org.bouncycastle.crypto.agreement.X25519Agreement
+import org.bouncycastle.crypto.generators.HKDFBytesGenerator
+import org.bouncycastle.crypto.generators.X25519KeyPairGenerator
+import org.bouncycastle.crypto.params.HKDFParameters
+import org.bouncycastle.crypto.params.X25519KeyGenerationParameters
+import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
+import org.bouncycastle.crypto.params.X25519PublicKeyParameters
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
-import kotlin.math.ceil
 
-class ExpoCryptoExtendedModule : Module() {
+class HkdfSha256Params(
+  @Field val ikmBase64: String = "",
+  @Field val keyLength: Int = 0,
+  @Field val salt: String? = null,
+  @Field val info: String? = null
+): Record
+
+class X25519KeyPair(
+  @Field val publicKey: String = "",
+  @Field val privateKey: String = ""
+): Record
+
+class HkdfSaltInfo(
+  @Field val salt: String = "",
+  @Field val info: String = ""
+): Record
+
+private
+const val BASE64_URL_FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
+
+private fun decodeBase64Compat(value: String): ByteArray {
+  val trimmed = value.trim()
+
+  return try {
+    Base64.decode(trimmed, BASE64_URL_FLAGS)
+  } catch (_: IllegalArgumentException) {
+    Base64.decode(trimmed, Base64.NO_WRAP)
+  }
+}
+
+class ExpoCryptoExtendedModule: Module() {
   override fun definition() = ModuleDefinition {
     Name("ExpoCryptoExtended")
 
-    // Retain native HKDF execution, accepting dynamic salt and info passed from JS
-    AsyncFunction("deriveKey") { ikmHex: String, saltHex: String, infoHex: String ->
-      val ikm = ikmHex.decodeHex()
-      val salt = if (saltHex.isNotEmpty()) saltHex.decodeHex() else ByteArray(32)
-      val info = infoHex.decodeHex()
+    AsyncFunction("generateKeyPair") {
+      promise: Promise ->
+        try {
+          val gen = X25519KeyPairGenerator()
+          gen.init(X25519KeyGenerationParameters(SecureRandom()))
+          val keyPair = gen.generateKeyPair()
 
-      val derivedKeyBytes = hkdfSha256(ikm, salt, info, 32)
-      return@AsyncFunction derivedKeyBytes.toHex()
-    }
-  }
+          val publicKey = keyPair.public as X25519PublicKeyParameters
+          val privateKey = keyPair.private as X25519PrivateKeyParameters
 
-  // Native HKDF-SHA256 Implementation in Kotlin
-  private fun hkdfSha256(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
-    val mac = Mac.getInstance("HmacSHA256")
-    val saltKey = SecretKeySpec(if (salt.isEmpty()) ByteArray(32) else salt, "HmacSHA256")
-    mac.init(saltKey)
-    val prk = mac.doFinal(ikm)
-
-    val prkKey = SecretKeySpec(prk, "HmacSHA256")
-    val hashLen = 32
-    val n = ceil(length.toDouble() / hashLen).toInt()
-    var okm = ByteArray(0)
-    var previousT = ByteArray(0)
-
-    for (i in 1..n) {
-      mac.init(prkKey)
-      mac.update(previousT)
-      mac.update(info)
-      mac.update(i.toByte())
-      previousT = mac.doFinal()
-      okm += previousT
+          promise.resolve(
+            X25519KeyPair(
+              publicKey = Base64.encodeToString(publicKey.encoded, BASE64_URL_FLAGS),
+              privateKey = Base64.encodeToString(privateKey.encoded, BASE64_URL_FLAGS)
+            )
+          )
+        } catch (e: Exception) {
+          promise.reject("ERR_KEYGEN", e.message, e)
+        }
     }
 
-    return okm.copyOf(length)
-  }
+    AsyncFunction("computeSharedSecret") {
+      privateKeyBase64: String,
+      endPublicKeyBase64: String,
+      promise: Promise ->
+        try {
+          val privateBytes = decodeBase64Compat(privateKeyBase64)
+          val publicBytes = decodeBase64Compat(endPublicKeyBase64)
 
-  // Extension helpers for Hex string conversions
-  private fun String.decodeHex(): ByteArray {
-    check(length % 2 == 0) { "Must have an even length" }
-    return chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-  }
+          val privateKey = X25519PrivateKeyParameters(privateBytes, 0)
+          val publicKey = X25519PublicKeyParameters(publicBytes, 0)
 
-  private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+          val agreement = X25519Agreement()
+          agreement.init(privateKey)
+          val sharedSecret = ByteArray(agreement.agreementSize)
+          agreement.calculateAgreement(publicKey, sharedSecret, 0)
+
+          promise.resolve(Base64.encodeToString(sharedSecret, Base64.NO_WRAP))
+        } catch (e: Exception) {
+          promise.reject("ERR_ECDH", e.message, e)
+        }
+    }
+
+    AsyncFunction("hkdfSha256") {
+      params: HkdfSha256Params,
+      promise: Promise ->
+        try {
+          val applicationInfo = appContext?.reactContext?.packageManager?.getApplicationInfo(appContext?.reactContext?.packageName.toString(), PackageManager.GET_META_DATA)
+
+          val ikmBytes = decodeBase64Compat(params.ikmBase64)
+
+          val salt = params.salt ?: applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_SALT") ?: "karr-e2e-v1-salt"
+          val info = params.info ?: applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_INFO") ?: "karr-e2e-v1-aes-gcm-key"
+
+          val saltBytes = salt.toByteArray(Charsets.UTF_8)
+          val infoBytes = info.toByteArray(Charsets.UTF_8)
+          val keyLength = params.keyLength
+
+          val generator = HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA256Digest())
+          generator.init(HKDFParameters(ikmBytes, saltBytes, infoBytes))
+
+          val out = ByteArray(keyLength)
+          generator.generateBytes(out, 0, keyLength)
+
+          promise.resolve(Base64.encodeToString(out, Base64.NO_WRAP))
+          return@AsyncFunction
+        } catch (e: Exception) {
+          promise.reject("ERR_HKDF", e.message, e)
+          return@AsyncFunction
+        }
+    }
+
+    AsyncFunction("aesGcmDecrypt") {
+      keyBase64: String,
+      nonceBase64url: String,
+      ciphertextBase64url: String,
+      promise: Promise ->
+        try {
+          val keyBytes = decodeBase64Compat(keyBase64)
+          val nonceBytes = decodeBase64Compat(nonceBase64url)
+          val combined = decodeBase64Compat(ciphertextBase64url)
+
+          if (combined.size <= 16) {
+            promise.reject("ERR_AES_GCM", "Ciphertext too short to contain auth tag", null)
+            return@AsyncFunction
+          }
+
+          // JCA AES/GCM/NoPadding expects ciphertext with tag appended — pass combined as-is
+          val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+          val keySpec = SecretKeySpec(keyBytes, "AES")
+          val gcmSpec = GCMParameterSpec(128, nonceBytes)
+          cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec)
+
+          val plainBytes = cipher.doFinal(combined)
+          promise.resolve(String(plainBytes, Charsets.UTF_8))
+          return@AsyncFunction
+        } catch (e: Exception) {
+          promise.reject("ERR_AES_GCM", e.message, e)
+          return@AsyncFunction
+        }
+    }
+
+    AsyncFunction("getHkdfInfo") {
+      promise: Promise ->
+        try {
+          val applicationInfo = appContext?.reactContext?.packageManager?.getApplicationInfo(appContext?.reactContext?.packageName.toString(), PackageManager.GET_META_DATA)
+
+          val salt = applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_SALT")
+          val info = applicationInfo?.metaData?.getString("EXPO_CRYPTO_EXTENDED_INFO")
+
+          promise.resolve(HkdfSaltInfo(salt = salt ?: "", info = info ?: ""))
+          return@AsyncFunction
+        } catch (e: Exception) {
+          promise.reject("ERR_HKDF", e.message, e)
+          return@AsyncFunction
+        }
+    }
+  }
 }

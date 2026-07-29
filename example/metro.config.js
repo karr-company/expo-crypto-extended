@@ -18,10 +18,6 @@ config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, '../node_modules'),
 ];
 
-config.resolver.extraNodeModules = {
-  '@karr-company/expo-crypto-extended': '..',
-};
-
 config.watchFolders = [path.resolve(__dirname, '..')];
 
 config.transformer.getTransformOptions = async () => ({
